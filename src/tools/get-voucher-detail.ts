@@ -2,15 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { tallyPost, reportEnvelope, xmlUnescape } from "../tally.js";
 
-function defaultFYRange(): { from: string; to: string } {
-  // ±3 months around today — avoids overloading Tally with huge exports
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const past = new Date(); past.setMonth(past.getMonth() - 3);
-  const future = new Date(); future.setMonth(future.getMonth() + 3);
-  return { from: fmt(past), to: fmt(future) };
-}
-
 function first(xml: string, tag: string): string {
   const m = new RegExp(`<${tag}(?=[\\s>])[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i").exec(xml);
   return m ? xmlUnescape(m[1].trim()) : "";
@@ -51,24 +42,20 @@ export function registerGetVoucherDetail(server: McpServer) {
   server.registerTool(
     "get_voucher_detail",
     {
-      description: "Fetch full details of a specific voucher by its number — includes line items (stock item, qty, rate, amount) and all ledger entries (party, taxes, etc.). Optionally provide a date hint to speed up the search.",
+      description: "Fetch full details of a specific voucher by its number — includes line items (stock item, qty, rate, amount) and all ledger entries (party, taxes, etc.). Requires the voucher date to avoid fetching large XML ranges from Tally.",
       inputSchema: {
         company: z.string().describe("Exact company name as shown in TallyPrime"),
         voucher_number: z.string().describe("Voucher number to look up (e.g. G-219)"),
+        date: z.string().describe("Voucher date in YYYYMMDD format (e.g. 20260131). Required — queries only that single day."),
         voucher_type: z
           .string()
           .optional()
           .describe("Voucher type to disambiguate when the same number exists across types (e.g. Payment, Receipt, Sales, Purchase, Contra)."),
-        date: z
-          .string()
-          .optional()
-          .describe("Date hint in YYYYMMDD format (e.g. 20260331). Speeds up search significantly when known."),
       },
     },
     async ({ company, voucher_number, voucher_type, date }) => {
-      const { from, to } = defaultFYRange();
-      const fromDate = date ?? from;
-      const toDate = date ?? to;
+      const fromDate = date;
+      const toDate = date;
 
       const dateVars = `<SVFROMDATE>${fromDate}</SVFROMDATE><SVTODATE>${toDate}</SVTODATE>`;
       const xml = await tallyPost(reportEnvelope("Voucher Register", company, dateVars));
